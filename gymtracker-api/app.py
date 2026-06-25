@@ -1,6 +1,5 @@
 import os
 import datetime
-from datetime import timedelta
 from flask import Flask, jsonify, g
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
@@ -29,9 +28,6 @@ def create_app():
     app.json_provider_class = ISOJSONProvider
     app.json = ISOJSONProvider(app)
     app.config.from_object(Config)
-
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(seconds=app.config["JWT_ACCESS_TOKEN_EXPIRES"])
-    app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(seconds=app.config["JWT_REFRESH_TOKEN_EXPIRES"])
 
     _frontend_urls = [u.strip() for u in app.config.get("FRONTEND_URL", "").split(",") if u.strip()]
     CORS(app, origins=_frontend_urls + ["http://localhost:5173", "http://localhost:3000"])

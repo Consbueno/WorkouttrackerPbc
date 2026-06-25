@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Plus, Trash2, AlertCircle, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Save, Ban } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
@@ -77,7 +76,7 @@ function CalendarioView({ onBack, programaId, onAbandon }: { onBack: () => void;
   const { data: allDays = [], isLoading } = useQuery({
     queryKey: ['todos-dias'],
     queryFn: () => diasApi.list().then(r => r.data.data as TrainingDay[]),
-    staleTime: 5_000,
+    staleTime: 60_000,
   })
 
   const { data: dayDetail } = useQuery({
@@ -166,16 +165,13 @@ function CalendarioView({ onBack, programaId, onAbandon }: { onBack: () => void;
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1">
-          <ChevronLeft className="h-4 w-4" />Wizard
-        </button>
-        <h2 className="font-semibold">Calendário do Programa</h2>
+        <h2 className="font-semibold">Calendário</h2>
         <Badge variant="outline">{allDays.length} dias</Badge>
         <div className="flex-1" />
         {programaId && (
           <button
             onClick={() => {
-              if (confirm('Abandonar o programa atual? Isso encerrará o ciclo sem concluí-lo e você poderá criar um novo programa.')) {
+              if (confirm('Abandonar o programa atual? Você poderá criar um novo programa em seguida.')) {
                 abandonMutation.mutate()
               }
             }}
@@ -183,7 +179,7 @@ function CalendarioView({ onBack, programaId, onAbandon }: { onBack: () => void;
             className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
           >
             <Ban className="h-3.5 w-3.5" />
-            Abandonar programa
+            Abandonar
           </button>
         )}
       </div>
@@ -345,10 +341,10 @@ function CalendarioView({ onBack, programaId, onAbandon }: { onBack: () => void;
 // ── Componente Principal ───────────────────────────────────────────────────
 
 export default function ManutencaoPage() {
-  const navigate = useNavigate()
   const qc = useQueryClient()
   const [step, setStep] = useState(1)
-  const [showCalendario, setShowCalendario] = useState(false)
+  // null = aguardando verificação de programa ativo; true = calendário; false = wizard
+  const [showCalendario, setShowCalendario] = useState<boolean | null>(null)
 
   // Step 1
   const [programName, setProgramName] = useState('Ciclo 1 — Periodização 16 Semanas')
@@ -381,7 +377,7 @@ export default function ManutencaoPage() {
     queryKey: ['academias'],
     queryFn: () => academiaApi.list().then(r => r.data.data as { id: number; name: string; is_active: boolean }[]),
   })
-  const { data: programaAtivo } = useQuery({
+  const { data: programaAtivo, isLoading: loadingPrograma } = useQuery({
     queryKey: ['programa-ativo'],
     queryFn: () => programasApi.getAtivo().then(r => r.data.data),
     staleTime: 30_000,
@@ -391,10 +387,12 @@ export default function ManutencaoPage() {
     if (athlete?.id) setAthleteId(athlete.id)
   }, [athlete])
 
-  // Se já existe programa e o usuário abre manutenção, vai direto ao calendário
+  // Inicializa a visão: calendário se existe programa, wizard se não existe
   useEffect(() => {
-    if (programaAtivo) setShowCalendario(true)
-  }, [programaAtivo])
+    if (!loadingPrograma && showCalendario === null) {
+      setShowCalendario(!!programaAtivo)
+    }
+  }, [loadingPrograma, programaAtivo])
 
   const blocksSum = blocks.reduce((s, b) => s + (b.end_week - b.start_week + 1), 0)
   const blocksValid = blocksSum === totalWeeks
@@ -524,6 +522,18 @@ export default function ManutencaoPage() {
   const activeExercises = exercises.filter((e: { is_active: boolean }) => e.is_active)
 
   // ── Render ─────────────────────────────────────────────────────────────
+
+  // Enquanto verifica se existe programa ativo, mostra skeleton
+  if (showCalendario === null) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Manutenção do Treino" description="Carregando..." />
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-lg border bg-card animate-pulse" />)}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
