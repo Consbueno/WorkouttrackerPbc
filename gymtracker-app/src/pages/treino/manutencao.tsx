@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Plus, Trash2, AlertCircle, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, AlertCircle, RotateCcw, CheckCircle2, ChevronDown, ChevronUp, Save, XOctagon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -68,7 +68,7 @@ function makeDefaultExercise(blockCount: number, order: number): SplitExercise {
 
 // ── Calendário de Treinos (Step 5) ──────────────────────────────────────────
 
-function CalendarioView({ onBack }: { onBack: () => void }) {
+function CalendarioView({ onBack, programaId, onAbandon }: { onBack: () => void; programaId?: number; onAbandon: () => void }) {
   const qc = useQueryClient()
   const [expandedDay, setExpandedDay] = useState<number | null>(null)
   const [planEdits, setPlanEdits] = useState<Record<number, Partial<DayExercise>>>({})
@@ -128,6 +128,19 @@ function CalendarioView({ onBack }: { onBack: () => void }) {
     onError: () => toast({ title: 'Erro ao salvar plano.', variant: 'destructive' }),
   })
 
+  const abandonMutation = useMutation({
+    mutationFn: () => programasApi.abandonar(programaId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['programa-ativo'] })
+      qc.invalidateQueries({ queryKey: ['todos-dias'] })
+      qc.invalidateQueries({ queryKey: ['proximo-dia'] })
+      qc.invalidateQueries({ queryKey: ['dias-stats'] })
+      toast({ title: 'Programa abandonado. Você pode criar um novo.' })
+      onAbandon()
+    },
+    onError: () => toast({ title: 'Erro ao abandonar programa.', variant: 'destructive' }),
+  })
+
   const byBlock = useMemo(() => {
     const map: Record<string, { color: string; days: TrainingDay[] }> = {}
     for (const d of allDays) {
@@ -158,6 +171,21 @@ function CalendarioView({ onBack }: { onBack: () => void }) {
         </button>
         <h2 className="font-semibold">Calendário do Programa</h2>
         <Badge variant="outline">{allDays.length} dias</Badge>
+        <div className="flex-1" />
+        {programaId && (
+          <button
+            onClick={() => {
+              if (confirm('Abandonar o programa atual? Isso encerrará o ciclo sem concluí-lo e você poderá criar um novo programa.')) {
+                abandonMutation.mutate()
+              }
+            }}
+            disabled={abandonMutation.isPending}
+            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+          >
+            <XOctagon className="h-3.5 w-3.5" />
+            Abandonar programa
+          </button>
+        )}
       </div>
 
       {byBlock.map(block => {
@@ -517,7 +545,11 @@ export default function ManutencaoPage() {
 
       {/* Calendário */}
       {showCalendario ? (
-        <CalendarioView onBack={() => setShowCalendario(false)} />
+        <CalendarioView
+          onBack={() => setShowCalendario(false)}
+          programaId={programaAtivo?.id}
+          onAbandon={() => setShowCalendario(false)}
+        />
       ) : (
         <>
           {/* Step indicator */}

@@ -10,6 +10,7 @@ export const programasApi = {
   duplicar: (id: number) => api.post(`/treino/programas/${id}/duplicar`),
   progressao: (id: number, percentual: number) =>
     api.post(`/treino/programas/${id}/progressao`, { percentual }),
+  abandonar: (id: number) => api.patch(`/treino/programas/${id}/abandonar`),
 }
 
 export const diasApi = {

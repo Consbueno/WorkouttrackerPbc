@@ -818,53 +818,36 @@ def save_draft(day_id):
 @jwt_required()
 def revert_day(day_id):
     user_id = int(get_jwt_identity())
-    try:
-        with db.db() as conn:
-            cur = conn.cursor()
-            # Injetar user_id para RLS (necessário pois usamos db() diretamente)
-            from flask import g as flask_g
-            uid = getattr(flask_g, "user_id", None)
-            if uid:
-                cur.execute("SET LOCAL app.current_user_id = %s", (str(uid),))
+    row = db.query_one(
+        """SELECT td.id, td.status, td.program_id FROM training_days td
+           JOIN training_programs tp ON tp.id = td.program_id
+           WHERE td.id = %s AND tp.user_id = %s""",
+        (day_id, user_id),
+    )
+    if not row:
+        return jsonify({"error": "Dia não encontrado."}), 404
+    if row["status"] == "pending":
+        return jsonify({"error": "Este dia já está pendente."}), 400
 
-            # Verificar propriedade e status atual
-            cur.execute(
-                """SELECT td.id, td.status, td.program_id FROM training_days td
-                   JOIN training_programs tp ON tp.id = td.program_id
-                   WHERE td.id = %s AND tp.user_id = %s""",
-                (day_id, user_id),
-            )
-            row = cur.fetchone()
-            if not row:
-                return jsonify({"error": "Dia não encontrado."}), 404
-            if row["status"] == "pending":
-                return jsonify({"error": "Este dia já está pendente."}), 400
-
-            # Reverter tudo numa única transação
-            cur.execute(
-                """UPDATE training_days
-                   SET status='pending', started_at=NULL, completed_at=NULL,
-                       notes=NULL, updated_at=NOW()
-                   WHERE id=%s""",
-                (day_id,),
-            )
-            cur.execute(
-                """UPDATE training_day_exercises
-                   SET actual_load_kg=NULL, actual_reps=NULL, is_completed=FALSE,
-                       exercise_notes=NULL, completed_at=NULL
-                   WHERE training_day_id=%s""",
-                (day_id,),
-            )
-            cur.execute(
-                """UPDATE training_programs SET status='active', updated_at=NOW()
-                   WHERE id=%s AND status='completed'""",
-                (row["program_id"],),
-            )
-    except Exception as e:
-        import traceback
-        print(f"[revert_day] erro: {e}\n{traceback.format_exc()}")
-        return jsonify({"error": f"Erro interno: {str(e)}"}), 500
-
+    db.execute(
+        """UPDATE training_days
+           SET status='pending', started_at=NULL, completed_at=NULL,
+               notes=NULL, updated_at=NOW()
+           WHERE id=%s""",
+        (day_id,),
+    )
+    db.execute(
+        """UPDATE training_day_exercises
+           SET actual_load_kg=NULL, actual_reps=NULL, is_completed=FALSE,
+               exercise_notes=NULL, completed_at=NULL
+           WHERE training_day_id=%s""",
+        (day_id,),
+    )
+    db.execute(
+        """UPDATE training_programs SET status='active', updated_at=NOW()
+           WHERE id=%s AND status='completed'""",
+        (row["program_id"],),
+    )
     return jsonify({"message": "Treino revertido para pendente."})
 
 
@@ -872,47 +855,49 @@ def revert_day(day_id):
 @jwt_required()
 def mark_day_completed(day_id):
     user_id = int(get_jwt_identity())
-    try:
-        with db.db() as conn:
-            cur = conn.cursor()
-            from flask import g as flask_g
-            uid = getattr(flask_g, "user_id", None)
-            if uid:
-                cur.execute("SET LOCAL app.current_user_id = %s", (str(uid),))
+    row = db.query_one(
+        """SELECT td.id, td.program_id FROM training_days td
+           JOIN training_programs tp ON tp.id = td.program_id
+           WHERE td.id = %s AND tp.user_id = %s""",
+        (day_id, user_id),
+    )
+    if not row:
+        return jsonify({"error": "Dia não encontrado."}), 404
 
-            cur.execute(
-                """SELECT td.id, td.program_id FROM training_days td
-                   JOIN training_programs tp ON tp.id = td.program_id
-                   WHERE td.id = %s AND tp.user_id = %s""",
-                (day_id, user_id),
-            )
-            row = cur.fetchone()
-            if not row:
-                return jsonify({"error": "Dia não encontrado."}), 404
-
-            cur.execute(
-                """UPDATE training_days
-                   SET status='completed', started_at=COALESCE(started_at, NOW()),
-                       completed_at=NOW(), updated_at=NOW()
-                   WHERE id=%s""",
-                (day_id,),
-            )
-            cur.execute(
-                "SELECT COUNT(*) as cnt FROM training_days WHERE program_id=%s AND status='pending'",
-                (row["program_id"],),
-            )
-            remaining = cur.fetchone()
-            if remaining and remaining["cnt"] == 0:
-                cur.execute(
-                    "UPDATE training_programs SET status='completed', updated_at=NOW() WHERE id=%s",
-                    (row["program_id"],),
-                )
-    except Exception as e:
-        import traceback
-        print(f"[mark_day_completed] erro: {e}\n{traceback.format_exc()}")
-        return jsonify({"error": f"Erro interno: {str(e)}"}), 500
-
+    db.execute(
+        """UPDATE training_days
+           SET status='completed', started_at=COALESCE(started_at, NOW()),
+               completed_at=NOW(), updated_at=NOW()
+           WHERE id=%s""",
+        (day_id,),
+    )
+    remaining = db.query_one(
+        "SELECT COUNT(*) as cnt FROM training_days WHERE program_id=%s AND status='pending'",
+        (row["program_id"],),
+    )
+    if remaining and remaining["cnt"] == 0:
+        db.execute(
+            "UPDATE training_programs SET status='completed', updated_at=NOW() WHERE id=%s",
+            (row["program_id"],),
+        )
     return jsonify({"message": "Treino marcado como realizado."})
+
+
+@bp.route("/programas/<int:prog_id>/abandonar", methods=["PATCH"])
+@jwt_required()
+def abandonar_programa(prog_id):
+    user_id = int(get_jwt_identity())
+    row = db.query_one(
+        "SELECT id FROM training_programs WHERE id=%s AND user_id=%s AND status='active'",
+        (prog_id, user_id),
+    )
+    if not row:
+        return jsonify({"error": "Programa ativo não encontrado."}), 404
+    db.execute(
+        "UPDATE training_programs SET status='archived', updated_at=NOW() WHERE id=%s",
+        (prog_id,),
+    )
+    return jsonify({"message": "Programa abandonado."})
 
 
 @bp.route("/dias/<int:day_id>/exercicios/<int:ex_id>/plano", methods=["PATCH"])
