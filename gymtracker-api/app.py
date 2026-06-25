@@ -1,3 +1,4 @@
+import os
 from flask import Flask, jsonify, g
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
@@ -22,6 +23,16 @@ def create_app():
     bcrypt.init_app(app)
     jwt.init_app(app)
 
+    database.init_db_config(app)
+
+    # init_db só roda localmente (defina INIT_DB=true no .env local)
+    if os.getenv("INIT_DB") == "true":
+        with app.app_context():
+            try:
+                database.init_db()
+            except Exception as e:
+                print(f"[DB] init_db error: {e}")
+
     @app.before_request
     def _set_db_user():
         """Extrai user_id do JWT e armazena em g para injeção RLS no db()."""
@@ -32,14 +43,6 @@ def create_app():
                 g.user_id = int(uid)
         except Exception:
             pass
-
-    database.init_pool(app)
-
-    with app.app_context():
-        try:
-            database.init_db()
-        except Exception as e:
-            print(f"[DB] init_db error: {e}")
 
     from modules.auth import bp as auth_bp
     from modules.cadastros import bp as cadastros_bp

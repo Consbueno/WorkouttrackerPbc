@@ -1,177 +1,171 @@
 # GymTracker 16W — Setup
 
-## Banco de dados: Supabase
+---
 
-### 1. Criar projeto no Supabase
+## 1. Banco de dados: Supabase
+
+### 1.1 Criar projeto
 
 1. Acesse [supabase.com](https://supabase.com) → **New project**
 2. Anote: **Project Ref**, **Region**, **Database Password**
 
-### 2. Aplicar o schema + seed
+### 1.2 Aplicar schema e seed
 
-No painel do Supabase: **SQL Editor → New query**
+Painel do Supabase → **SQL Editor → New query**
 
-Cole e execute cada arquivo em ordem:
+Execute na ordem:
+1. Cole o conteúdo de `gymtracker-api/schema.sql` → **Run**
+2. Cole o conteúdo de `gymtracker-api/seed.sql` → **Run**
 
-```
-gymtracker-api/schema.sql   ← tabelas, triggers, índices, RLS
-gymtracker-api/seed.sql     ← exercícios padrão
-```
+### 1.3 Obter a connection string (Transaction Pooler)
 
-> O `schema.sql` habilita RLS com `FORCE` em todas as 13 tabelas.
-> O seed roda como `postgres` (sem `app.current_user_id`), ativando o bypass policy.
+> Para Vercel (serverless) use o **Transaction Pooler** (porta 6543).
 
-### 3. Obter a connection string
-
-**Caminho exato no painel do Supabase:**
-
-1. Abra seu projeto no [supabase.com/dashboard](https://supabase.com/dashboard)
-2. No menu lateral esquerdo, clique em **"Project Settings"** (ícone de engrenagem ⚙️)
-3. No submenu que abre, clique em **"Database"**
-4. Role a página para baixo até encontrar a seção **"Connection string"**
-5. Você verá abas: `URI` · `PSQL` · `JDBC` · `.NET` — clique em **`URI`**
-6. O campo exibe a string no formato abaixo. Clique em **Copy** (ícone de cópia)
+1. Painel do Supabase → **Project Settings** (⚙️ no menu lateral)
+2. Clique em **Database**
+3. Role até **"Connection pooling"**
+4. Clique na aba **`URI`**
+5. Copie a string (formato abaixo) e substitua `[YOUR-PASSWORD]` pela senha real:
 
 ```
-postgresql://postgres.[PROJECT_REF]:[YOUR-PASSWORD]@aws-0-[REGION].supabase.com:5432/postgres
+postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
 ```
 
-> **Atenção:** A string exibida traz `[YOUR-PASSWORD]` literal — substitua pela senha
-> que você definiu ao criar o projeto (passo 1).
-
-**Direct vs. Pooler — qual usar?**
-
-| Modo | Aba | Porta | Quando usar |
-|------|-----|-------|-------------|
-| Direct connection | URI | 5432 | ✅ Recomendado — o gunicorn tem pool próprio |
-| Transaction pooler | Connection pooling → URI | 6543 | Só se o Supabase gerenciar o pool |
-
-> Se não encontrar a seção "Connection string" na aba Database, procure por
-> **"Connection pooling"** — alguns planos exibem as strings lá.
-
-### 4. Colar a connection string no arquivo .env
-
-Abra o arquivo `gymtracker-api/.env` (já existe no projeto) e cole a string
-copiada do Supabase como valor de `DATABASE_URL`:
-
-```env
-DATABASE_URL=postgresql://postgres.abcdefghijklm:SuaSenhaAqui@aws-0-sa-east-1.supabase.com:5432/postgres
-```
-
-Preencha também as outras variáveis do mesmo arquivo:
-
-```env
-DATABASE_URL=<string copiada do Supabase — substitua [YOUR-PASSWORD] pela senha real>
-
-SECRET_KEY=<qualquer string longa e aleatória, ex: abcd1234...64chars>
-JWT_SECRET_KEY=<outra string longa e diferente da anterior>
-
-ANTHROPIC_API_KEY=sk-ant-api03-...   ← chave da sua conta em console.anthropic.com
-FRONTEND_URL=https://seu-dominio.com  ← URL onde o frontend vai rodar
-```
-
-Salve o arquivo. O backend lê `.env` automaticamente ao iniciar.
+> **Atenção:** se a senha tiver `@` ou `$`, encode antes de colar na URL:
+> `@` → `%40` · `$` → `%24`
 
 ---
 
-## Desenvolvimento local (PostgreSQL local)
+## 2. Deploy do Backend (Vercel)
 
-Se preferir rodar sem Supabase localmente:
+### 2.1 Criar projeto na Vercel
 
-```sql
-CREATE USER gymtracker_user WITH PASSWORD 'gymtracker_pass';
-CREATE DATABASE gymtracker OWNER gymtracker_user;
-GRANT ALL PRIVILEGES ON DATABASE gymtracker TO gymtracker_user;
-```
+1. Acesse [vercel.com](https://vercel.com) → **Add New Project**
+2. Importe o repositório `Consbueno/WorkoutTracker`
+3. Em **"Root Directory"** defina: `gymtracker-api`
+4. Framework Preset: **Other**
+5. Clique em **Deploy** (vai falhar na primeira vez — normal, precisa das env vars)
 
-No `.env`, use as vars individuais (sem `DATABASE_URL`):
+### 2.2 Configurar variáveis de ambiente
 
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=gymtracker
-DB_USER=gymtracker_user
-DB_PASSWORD=gymtracker_pass
-DB_SSLMODE=disable
-```
+No painel do projeto Vercel → **Settings → Environment Variables**
 
-O backend aplica `schema.sql` e `seed.sql` automaticamente no boot (`init_db()`).
+Adicione cada variável:
 
-> **RLS local:** Com PostgreSQL local conectado como `gymtracker_user`
-> (não-owner), o RLS é aplicado. Com `postgres` (owner sem FORCE), é bypassado.
-> O comportamento é idêntico ao Supabase em produção.
+| Variável | Valor |
+|---|---|
+| `DATABASE_URL` | Connection string do Supabase (Transaction Pooler, porta 6543) |
+| `SECRET_KEY` | String aleatória 64 chars |
+| `JWT_SECRET_KEY` | Outra string aleatória 64 chars |
+| `ANTHROPIC_API_KEY` | `sk-ant-api03-...` |
+| `FRONTEND_URL` | `https://workouttracker.consbueno.com` |
+
+> `INIT_DB` deixe **vazio** — o schema já foi aplicado no Supabase.
+
+### 2.3 Fazer redeploy
+
+Vercel → **Deployments → Redeploy** (agora com as variáveis corretas)
+
+### 2.4 Domínio customizado do backend
+
+1. Vercel → projeto do backend → **Settings → Domains**
+2. Adicione: `api.workouttracker.consbueno.com`
+3. A Vercel exibe um registro CNAME — anote-o
 
 ---
 
-## Backend
+## 3. Deploy do Frontend (Vercel)
+
+### 3.1 Criar segundo projeto na Vercel
+
+1. Vercel → **Add New Project** → mesmo repositório `Consbueno/WorkoutTracker`
+2. Em **"Root Directory"** defina: `gymtracker-app`
+3. Framework Preset: **Vite**
+4. Clique em **Deploy**
+
+### 3.2 Variável de ambiente do frontend
+
+Vercel → projeto do frontend → **Settings → Environment Variables**
+
+| Variável | Valor |
+|---|---|
+| `VITE_API_URL` | `https://api.workouttracker.consbueno.com` |
+
+Redeploy após adicionar.
+
+### 3.3 Domínio customizado do frontend
+
+1. Vercel → projeto do frontend → **Settings → Domains**
+2. Adicione: `workouttracker.consbueno.com`
+3. A Vercel exibe um registro CNAME — anote-o
+
+---
+
+## 4. DNS na Hostinger
+
+Painel Hostinger → **Domínios → consbueno.com → DNS / Nameservers → Gerenciar DNS**
+
+Adicione dois registros CNAME:
+
+| Tipo | Nome | Destino |
+|---|---|---|
+| CNAME | `workouttracker` | `cname.vercel-dns.com` |
+| CNAME | `api.workouttracker` | `cname.vercel-dns.com` |
+
+> O destino `cname.vercel-dns.com` é o padrão da Vercel. Confirme o valor exato
+> que cada projeto exibe em **Settings → Domains** antes de salvar.
+
+Propagação do DNS: 5 minutos a 2 horas.
+
+---
+
+## 5. Resultado final
+
+| URL | O que é |
+|---|---|
+| `workouttracker.consbueno.com` | React PWA (frontend) |
+| `api.workouttracker.consbueno.com` | Flask API (backend) |
+| *(interno)* | PostgreSQL no Supabase |
+
+---
+
+## Desenvolvimento local
+
+### Backend
 
 ```bash
 cd gymtracker-api
+python -m venv .venv
+.venv\Scripts\activate        # Windows
 pip install -r requirements.txt
+```
+
+Adicione `INIT_DB=true` no `.env` local para aplicar schema/seed automaticamente.
+
+```bash
 flask --app app:create_app run --debug --port 5000
 ```
 
----
+Teste: `http://localhost:5000/health` → `{"status": "ok"}`
 
-## Frontend
+### Frontend
 
 ```bash
 cd gymtracker-app
 npm install
-npm run dev        # http://localhost:5173
+npm run dev    # http://localhost:5173
 ```
 
-Variável de ambiente frontend (`gymtracker-app/.env.local`):
+`.env.local` do frontend:
 ```env
 VITE_API_URL=http://localhost:5000
 ```
 
 ---
 
-## Build / Deploy (EasyPanel)
-
-```bash
-docker build -t gymtracker-api ./gymtracker-api
-docker build -t gymtracker-app ./gymtracker-app
-```
-
-| Serviço | Porta | Protocolo destino |
-|---------|-------|-------------------|
-| gymtracker_api | 5000 | **HTTP** (SSL no proxy) |
-| gymtracker_app | 80 | **HTTP** (SSL no proxy) |
-
-No EasyPanel, defina `DATABASE_URL` como variável de ambiente do serviço `gymtracker_api`.
-
----
-
-## Arquitetura RLS
-
-```
-Request HTTP
-    │
-    ▼
-Flask before_request
-    └─ JWT → g.user_id = 42
-                │
-                ▼
-           db() context manager
-               └─ SET LOCAL app.current_user_id = '42'
-                              │
-                              ▼
-                    PostgreSQL / Supabase
-                    └─ RLS policy: user_id = current_user_id()
-                                               └─ = 42 ✓
-```
-
-Tabelas com `user_id` direto: política simples.
-Tabelas sem `user_id` (blocos, splits, dias): política via JOIN/subquery até `training_programs.user_id`.
-Operações admin (init_db/seed sem JWT): bypass policy para role `postgres`.
-
----
-
 ## Ícones PWA
 
-Substitua os arquivos em `gymtracker-app/public/`:
+Substitua em `gymtracker-app/public/`:
 - `favicon.ico` (32×32)
 - `icon-192.png` (192×192)
 - `icon-512.png` (512×512)

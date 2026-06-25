@@ -1,67 +1,62 @@
 import psycopg2
 import psycopg2.extras
-import psycopg2.pool
 import os
 from contextlib import contextmanager
 
-_pool = None
+# Em serverless (Vercel) não há pool persistente entre invocações.
+# Cada request abre e fecha sua própria conexão.
+# O Supabase Transaction Pooler (porta 6543) gerencia o pool real.
+
+_dsn = None
+_dsn_kwargs = None
 
 
-def init_pool(app):
-    global _pool
+def init_db_config(app):
+    global _dsn, _dsn_kwargs
     db_url = app.config.get("DATABASE_URL")
-
     if db_url:
-        # Supabase: DATABASE_URL já inclui host, porta, SSL etc.
-        # Acrescentamos sslmode=require se não estiver na URL.
         if "sslmode" not in db_url:
             sep = "&" if "?" in db_url else "?"
             db_url = f"{db_url}{sep}sslmode=require"
-
-        _pool = psycopg2.pool.ThreadedConnectionPool(
-            2, 10,
-            dsn=db_url,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
+        _dsn = db_url
     else:
-        # Desenvolvimento local: vars individuais
-        _pool = psycopg2.pool.ThreadedConnectionPool(
-            2, 10,
+        _dsn_kwargs = dict(
             host=app.config["DB_HOST"],
             port=app.config["DB_PORT"],
             dbname=app.config["DB_NAME"],
             user=app.config["DB_USER"],
             password=app.config["DB_PASSWORD"],
             sslmode=app.config.get("DB_SSLMODE", "prefer"),
-            cursor_factory=psycopg2.extras.RealDictCursor,
         )
+
+
+def _connect():
+    kw = dict(cursor_factory=psycopg2.extras.RealDictCursor)
+    if _dsn:
+        return psycopg2.connect(_dsn, **kw)
+    return psycopg2.connect(**_dsn_kwargs, **kw)
 
 
 @contextmanager
 def db():
-    conn = _pool.getconn()
+    conn = _connect()
     try:
         cur = conn.cursor()
-
-        # Injeta o user_id atual para as políticas de RLS.
-        # SET LOCAL é restrito à transação atual — seguro com connection pool.
+        # Injeta user_id para RLS (SET LOCAL — escopo da transação)
         try:
             from flask import g
             user_id = getattr(g, "user_id", None)
             if user_id is not None:
                 cur.execute("SET LOCAL app.current_user_id = %s", (str(user_id),))
         except RuntimeError:
-            # Fora do contexto Flask (ex: init_db) — sem SET LOCAL;
-            # o role postgres tem bypass policy e opera normalmente.
             pass
-
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
-        _pool.putconn(conn)
+        conn.close()
 
 
 def query(sql, params=None):
@@ -89,7 +84,7 @@ def execute(sql, params=None):
 
 
 def init_db():
-    """Executa schema.sql e seed.sql como role admin (bypassa RLS)."""
+    """Executa schema.sql e seed.sql. Use apenas em desenvolvimento local (INIT_DB=true)."""
     base = os.path.dirname(os.path.abspath(__file__))
     with db() as conn:
         cur = conn.cursor()
@@ -101,4 +96,4 @@ def init_db():
             with open(os.path.join(base, "seed.sql"), encoding="utf-8") as f:
                 cur.execute(f.read())
     except Exception as e:
-        print(f"[DB] Seed skipped (probably already applied): {e}")
+        print(f"[DB] Seed skipped: {e}")
