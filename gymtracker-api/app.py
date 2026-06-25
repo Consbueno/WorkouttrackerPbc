@@ -104,4 +104,9 @@ def create_app():
     def health():
         return jsonify({"status": "ok"})
 
+    @app.route("/debug/routes")
+    def debug_routes():
+        routes = sorted([str(r) for r in app.url_map.iter_rules()])
+        return jsonify({"routes": routes, "total": len(routes)})
+
     return app
