@@ -1,12 +1,14 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Dumbbell, ClipboardList, Settings,
   Users, Building2, ChevronDown, ChevronRight,
   Activity, BarChart3, Cpu, Wrench, PanelLeftClose, PanelLeftOpen,
+  LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { useAppStore } from '@/stores/app-store'
+import { useAuthStore } from '@/stores/auth-store'
 
 interface NavItem {
   to?: string
@@ -41,8 +43,15 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const { sidebarCollapsed, toggleSidebar } = useAppStore()
+  const { user, logout } = useAuthStore()
   const [expanded, setExpanded] = useState<string[]>(['Cadastros', 'Treino'])
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
 
   const toggleGroup = (label: string) =>
     setExpanded(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label])
@@ -75,7 +84,7 @@ export function Sidebar() {
       </div>
 
       {/* Navegação */}
-      <nav className={cn('flex-1 overflow-y-auto py-4 space-y-1', collapsed ? 'px-2' : 'px-3')}>
+      <nav className={cn('flex-1 overflow-y-auto py-4 space-y-1 min-h-0', collapsed ? 'px-2' : 'px-3')}>
         {navItems.map(item => {
           if (item.to) {
             const active = pathname === item.to
@@ -166,6 +175,34 @@ export function Sidebar() {
           )
         })}
       </nav>
+      {/* Rodapé: email + logout */}
+      <div className={cn(
+        'shrink-0 border-t',
+        collapsed ? 'px-2 py-3 flex justify-center' : 'px-3 py-3'
+      )}>
+        {collapsed ? (
+          <button
+            onClick={handleLogout}
+            title={`Sair (${user?.email ?? ''})`}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground truncate">{user?.email ?? '—'}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Sair"
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
     </aside>
   )
 }
